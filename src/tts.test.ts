@@ -9,15 +9,35 @@ function tmpdir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "ndemo-tts-"));
 }
 
-test("buildCommand подставляет все четыре плейсхолдера", () => {
+test("buildCommand подставляет все четыре плейсхолдера с экранированием", () => {
   const command = buildCommand(
     "{{skillDir}}/contrib/ailab-tts.sh --voice {{voice}} --speed {{speed}} --out {{out}}",
     { out: "/o/intro.mp3", voice: "vpc_abc", speed: "0.9", skillDir: "/skill" }
   );
   assert.equal(
     command,
-    "/skill/contrib/ailab-tts.sh --voice vpc_abc --speed 0.9 --out /o/intro.mp3"
+    "'/skill'/contrib/ailab-tts.sh --voice 'vpc_abc' --speed '0.9' --out '/o/intro.mp3'"
   );
+});
+
+test("buildCommand экранирует voice от инъекций", async () => {
+  const dir = tmpdir();
+  const out = path.join(dir, "intro.mp3");
+  const marker = path.join(dir, "PWNED");
+  const injectedVoice = `$(touch ${marker})`;
+  const command = buildCommand(
+    "printf '%s' {{voice}} > {{out}}",
+    { out, voice: injectedVoice, speed: "1.0", skillDir: "/skill" }
+  );
+
+  await runCommandProvider(command, "ignored", out);
+
+  assert.equal(
+    fs.readFileSync(out, "utf8"),
+    injectedVoice,
+    "инъекция в voice должна сохраниться как текст, а не выполниться"
+  );
+  assert.equal(fs.existsSync(marker), false, "подстановка voice в команду через кавычки — инъекция предотвращена");
 });
 
 test("текст закадра идёт через stdin и не исполняется шеллом", async () => {
