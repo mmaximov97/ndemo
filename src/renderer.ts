@@ -44,8 +44,8 @@ async function render(
   const { pending, total } = pendingSegmentCount(playbook, outputDir);
   console.log(
     pending === 0
-      ? `Generating TTS audio... (все ${total} сегментов уже в кеше)`
-      : `Generating TTS audio... (${pending} из ${total} нужно синтезировать)`
+      ? `Generating TTS audio... (all ${total} segments already cached)`
+      : `Generating TTS audio... (${pending} of ${total} need synthesis)`
   );
   const audioResults: Array<{ id: string; audioPath: string | null; durationMs: number }> = [];
   for (const segment of playbook.segments) {
