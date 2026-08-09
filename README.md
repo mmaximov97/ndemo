@@ -219,9 +219,20 @@ tts:
 ```
 
 Placeholders: `{{out}}`, `{{voice}}`, `{{speed}}`, `{{skillDir}}` (the toolkit
-install root). The narration is never interpolated into the command line.
+install root). Each value is substituted already shell-escaped — do not wrap
+a placeholder in your own quotes, or the quote characters end up baked into
+the literal value (e.g. `--out "{{out}}"` writes to a path with `'` in the
+filename). The narration is never interpolated into the command line.
 Whatever the command writes to stderr is streamed through, which is how a slow
 synthesizer shows it is alive.
+
+**Failure contract.** The command must write a non-empty mp3 to `{{out}}`
+and exit 0; ndemo treats any of the following as a failure for the segment:
+a non-zero exit code, a zero exit with nothing written to `{{out}}`, or a
+zero exit with an empty file there. The command is killed if it runs past a
+15-minute ceiling, which is reported as a timeout rather than a bare exit
+code — a synthesizer expected to take a while should enforce its own shorter
+timeout well under that and retry internally.
 
 `contrib/ailab-tts.sh` is a working example, and suits any gateway whose
 `/v1/audio/speech` returns a job to poll rather than ready audio. It needs

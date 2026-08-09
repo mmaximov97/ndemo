@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { execa } from "execa";
+import { execa, type ExecaError } from "execa";
 import OpenAI from "openai";
 import type { Playbook, Segment } from "./schema.js";
 
@@ -17,6 +17,15 @@ function ttsHash(narration: string, voice: string, speed: number): string {
     .update(narration + voice + speed)
     .digest("hex")
     .slice(0, 8);
+}
+
+/**
+ * Путь к кешированной озвучке сегмента. Единственное место, знающее формат
+ * имени файла (`{id}-{hash}.mp3`) — используется и синтезом (ensureAudio), и
+ * счётчиком (pendingSegmentCount), чтобы они не могли разойтись.
+ */
+function cachedAudioPath(audioDir: string, segmentId: string, hash: string): string {
+  return path.join(audioDir, `${segmentId}-${hash}.mp3`);
 }
 
 /**
@@ -79,6 +88,11 @@ function buildCommand(template: string, vars: CommandVars): string {
   );
 }
 
+// Потолок на зависший скрипт. Сам скрипт держит лимит меньше: 6 минут на
+// попытку и один повтор, который в FIFO-очереди шлюза может встать за всё
+// ещё считающимся первым джобом.
+const COMMAND_TIMEOUT_MS = 15 * 60 * 1000;
+
 /**
  * Запускает внешнюю программу синтеза. Текст идёт в stdin, путь выходного
  * файла диктует ndemo. stderr одновременно показывается пользователю (это
@@ -95,17 +109,15 @@ async function runCommandProvider(
       shell: true,
       input: narration,
       stderr: ["inherit", "pipe"],
-      // Потолок на зависший скрипт. Сам скрипт держит лимит меньше: 6 минут
-      // на попытку и один повтор, который в FIFO-очереди шлюза может встать
-      // за всё ещё считающимся первым джобом.
-      timeout: 15 * 60 * 1000,
+      timeout: COMMAND_TIMEOUT_MS,
     });
   } catch (error) {
-    const err = error as { exitCode?: number; stderr?: string };
+    const err = error as ExecaError;
     const tail = String(err.stderr ?? "").trim().split("\n").slice(-5).join("\n");
-    throw new Error(
-      `TTS command failed (exit ${err.exitCode ?? "?"}):\n  ${command}\n${tail}`
-    );
+    const reason = err.timedOut
+      ? `timed out after ${COMMAND_TIMEOUT_MS / 60_000} minutes`
+      : `exit ${err.exitCode ?? err.signal ?? "?"}`;
+    throw new Error(`TTS command failed (${reason}):\n  ${command}\n${tail}`);
   }
 
   if (!fs.existsSync(audioPath) || fs.statSync(audioPath).size === 0) {
@@ -126,7 +138,7 @@ async function ensureAudio(
   fs.mkdirSync(audioDir, { recursive: true });
 
   const hash = ttsHash(segment.narration!, playbook.tts.voice, playbook.tts.speed);
-  const audioPath = path.join(audioDir, `${segment.id}-${hash}.mp3`);
+  const audioPath = cachedAudioPath(audioDir, segment.id, hash);
 
   // Clean up stale files for this segment
   cleanStaleAudio(audioDir, segment.id, hash);
@@ -184,9 +196,9 @@ async function probeDuration(audioPath: string): Promise<number> {
 const generateTts = ensureAudio;
 
 /**
- * Сколько сегментов с закадром придётся синтезировать заново. Считает по тому
- * же имени файла, что и кеш (`{id}-{hash}.mp3`), — иначе счётчик разошёлся бы
- * с реальностью при смене голоса или темпа.
+ * Сколько сегментов с закадром придётся синтезировать заново. Путь к файлу
+ * считает через cachedAudioPath — тот же хелпер, что и кеш в ensureAudio, —
+ * иначе счётчик разошёлся бы с реальностью при смене голоса или темпа.
  */
 function pendingSegmentCount(
   playbook: Playbook,
@@ -196,7 +208,7 @@ function pendingSegmentCount(
   const narrated = playbook.segments.filter(s => s.narration);
   const pending = narrated.filter(s => {
     const hash = ttsHash(s.narration!, playbook.tts.voice, playbook.tts.speed);
-    return !fs.existsSync(path.join(audioDir, `${s.id}-${hash}.mp3`));
+    return !fs.existsSync(cachedAudioPath(audioDir, s.id, hash));
   });
   return { pending: pending.length, total: narrated.length };
 }

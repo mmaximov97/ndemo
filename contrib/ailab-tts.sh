@@ -23,10 +23,10 @@ die() { echo "ailab-tts: $*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --voice) VOICE="$2"; shift 2 ;;
-    --speed) SPEED="$2"; shift 2 ;;
-    --out)   OUT="$2";   shift 2 ;;
-    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --voice) VOICE="${2:?--voice requires a value}"; shift 2 ;;
+    --speed) SPEED="${2:?--speed requires a value}"; shift 2 ;;
+    --out)   OUT="${2:?--out requires a value}";     shift 2 ;;
+    -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
