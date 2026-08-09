@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { execa } from "execa";
 import OpenAI from "openai";
 import type { Playbook, Segment } from "./schema.js";
@@ -44,6 +45,64 @@ function cleanStaleAudio(audioDir: string, segmentId: string, currentHash: strin
   }
 }
 
+/** Корень установки тулкита: dist/tts.js → директория с package.json. */
+function skillDir(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+}
+
+interface CommandVars {
+  out: string;
+  voice: string;
+  speed: string;
+  skillDir: string;
+}
+
+/**
+ * Подставляет в строку запуска только безопасные значения. Текста закадра
+ * здесь нет намеренно: он многострочный и произвольный, и попадание его в
+ * командную строку было бы инъекцией через содержимое плейбука.
+ */
+function buildCommand(template: string, vars: CommandVars): string {
+  return template.replace(
+    /\{\{(out|voice|speed|skillDir)\}\}/g,
+    (_match, key: keyof CommandVars) => vars[key]
+  );
+}
+
+/**
+ * Запускает внешнюю программу синтеза. Текст идёт в stdin, путь выходного
+ * файла диктует ndemo. stderr одновременно показывается пользователю (это
+ * единственный признак жизни во время долгого синтеза) и запоминается, чтобы
+ * попасть в сообщение об ошибке.
+ */
+async function runCommandProvider(
+  command: string,
+  narration: string,
+  audioPath: string
+): Promise<void> {
+  try {
+    await execa(command, {
+      shell: true,
+      input: narration,
+      stderr: ["inherit", "pipe"],
+      // Потолок на зависший скрипт. Сам скрипт держит лимит меньше: 6 минут
+      // на попытку и один повтор, который в FIFO-очереди шлюза может встать
+      // за всё ещё считающимся первым джобом.
+      timeout: 15 * 60 * 1000,
+    });
+  } catch (error) {
+    const err = error as { exitCode?: number; stderr?: string };
+    const tail = String(err.stderr ?? "").trim().split("\n").slice(-5).join("\n");
+    throw new Error(
+      `TTS command failed (exit ${err.exitCode ?? "?"}):\n  ${command}\n${tail}`
+    );
+  }
+
+  if (!fs.existsSync(audioPath) || fs.statSync(audioPath).size === 0) {
+    throw new Error(`TTS command exited 0 but wrote no audio to ${audioPath}\n  ${command}`);
+  }
+}
+
 /**
  * Ensure TTS audio exists for a segment, regenerating if narration/voice/speed changed.
  * Deletes stale audio files automatically.
@@ -81,6 +140,14 @@ async function ensureAudio(
 
     const arrayBuffer = await response.arrayBuffer();
     fs.writeFileSync(audioPath, new Uint8Array(arrayBuffer));
+  } else if (playbook.tts.provider === "command") {
+    const command = buildCommand(playbook.tts.command!, {
+      out: audioPath,
+      voice: playbook.tts.voice,
+      speed: String(playbook.tts.speed),
+      skillDir: skillDir(),
+    });
+    await runCommandProvider(command, segment.narration!, audioPath);
   } else {
     throw new Error(`TTS provider "${playbook.tts.provider}" not yet implemented`);
   }
@@ -106,4 +173,4 @@ async function probeDuration(audioPath: string): Promise<number> {
 // Keep generateTts as an alias for ensureAudio for backwards compat within renderer
 const generateTts = ensureAudio;
 
-export { generateTts, ensureAudio, probeDuration, ttsHash, findAudioFile };
+export { generateTts, ensureAudio, probeDuration, ttsHash, findAudioFile, buildCommand, runCommandProvider, skillDir };
