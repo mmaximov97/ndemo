@@ -36,8 +36,12 @@ interface Gateway {
   close: () => Promise<void>;
 }
 
-/** @param outcomes исход каждого последующего задания: "ok" | "failed" */
-async function fakeGateway(outcomes: Array<"ok" | "failed">): Promise<Gateway> {
+/**
+ * @param outcomes исход каждого последующего задания: "ok" | "failed"
+ * @param output содержимое ответа на /output — по умолчанию валидный wav;
+ *   тест на срыв конвертации подсовывает сюда произвольный не-wav буфер.
+ */
+async function fakeGateway(outcomes: Array<"ok" | "failed">, output: Buffer = silentWav()): Promise<Gateway> {
   let submits = 0;
   const polls = new Map<string, number>();
 
@@ -55,7 +59,7 @@ async function fakeGateway(outcomes: Array<"ok" | "failed">): Promise<Gateway> {
     const outputMatch = url.match(/^\/v1\/jobs\/(job_\d+)\/output$/);
     if (outputMatch) {
       res.writeHead(200, { "content-type": "audio/wav" });
-      res.end(silentWav());
+      res.end(output);
       return;
     }
     const jobMatch = url.match(/^\/v1\/jobs\/(job_\d+)$/);
@@ -171,4 +175,18 @@ test("без AILAB_API_KEY скрипт падает до сети", async () =>
   assert.notEqual(result.exitCode, 0);
   assert.equal(submits, 0);
   assert.match(result.stderr, /AILAB_API_KEY/);
+});
+
+test("сорванная конвертация не оставляет ни --out, ни .part рядом с ним", async () => {
+  // Шлюз отдаёт на /output не wav, а произвольный текст: проверку [ -s "$WAV" ]
+  // в скрипте он пройдёт (файл непустой), а вот ffmpeg декодировать его не сможет —
+  // это доводит скрипт до срыва конвертации, не трогая сам скрипт.
+  const gw = await fakeGateway(["ok"], Buffer.from("это не wav, а произвольный текст"));
+  const out = tmpOut();
+  const result = await run(gw.url, ["--voice", "vpc_test", "--speed", "1.0", "--out", out], "Текст.");
+  await gw.close();
+
+  assert.notEqual(result.exitCode, 0);
+  assert.equal(fs.existsSync(out), false, "оборванный/невалидный файл не должен появляться по итоговому пути");
+  assert.equal(fs.existsSync(`${out}.part`), false, "временный .part должен быть убран trap'ом на EXIT");
 });

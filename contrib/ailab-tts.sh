@@ -53,8 +53,12 @@ TEXT="$(cat)"
 [ -n "$TEXT" ] || die "empty text on stdin"
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
 WAV="$TMP/raw.wav"
+# Соседний временный файл, а не файл внутри $TMP: $TMP обычно живёт в /tmp,
+# и mv оттуда в $OUT через границу файловых систем превращается в копирование,
+# то есть перестаёт быть атомарным. Сосед по директории гарантирует rename(2).
+PART="$OUT.part"
+trap 'rm -rf "$TMP"; rm -f "$PART"' EXIT
 
 synth_once() {
   local submit job status seen
@@ -106,6 +110,15 @@ fi
 mkdir -p "$(dirname "$OUT")"
 # У qwen-tts нет параметра скорости — темп меняется только здесь. atempo
 # сохраняет высоту тона, поэтому голос остаётся собой.
+#
+# Пишем во временный файл рядом с $OUT и переименовываем только после того,
+# как ffmpeg подтвердил успех. Иначе под set -e ненулевой выход ffmpeg убивает
+# скрипт прямо на этой строке, а обрубленный поток, который ffmpeg успел
+# записать напрямую в $OUT, остался бы лежать по итоговому пути — кеш ndemo
+# (src/tts.ts) считает сегмент готовым по одному факту существования файла,
+# без проверки размера, так что огрызок молча зачёлся бы как готовая озвучка.
+# -f mp3 обязателен: по расширению .part ffmpeg не может угадать контейнер.
 ffmpeg -nostdin -loglevel error -y -i "$WAV" -filter:a "atempo=$SPEED" \
-  -c:a libmp3lame -q:a 4 "$OUT"
-[ -s "$OUT" ] || die "ffmpeg did not produce $OUT"
+  -c:a libmp3lame -q:a 4 -f mp3 "$PART"
+[ -s "$PART" ] || die "ffmpeg did not produce audio"
+mv -f "$PART" "$OUT"
