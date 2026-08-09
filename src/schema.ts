@@ -127,10 +127,16 @@ const PlaybookSchema = z.object({
     setup: z.array(SetupStepSchema).optional(),
   }),
   tts: z.object({
-    provider: z.enum(["openai", "elevenlabs"]).default("openai"),
+    provider: z.enum(["openai", "elevenlabs", "command"]).default("openai"),
     voice: z.string().default("alloy"),
     speed: z.number().positive().default(1.0),
-  }).default({}),
+    // Провайдер "command": строка запуска внешней программы синтеза.
+    // Плейсхолдеры {{out}}, {{voice}}, {{speed}}, {{skillDir}}; текст идёт в stdin.
+    command: z.string().optional(),
+  }).refine(
+    t => t.provider !== "command" || Boolean(t.command),
+    { message: 'tts.provider "command" requires tts.command' }
+  ).default({}),
   recording: z.object({
     outputDir: z.string().default("."),
     fps: z.number().int().positive().default(30),
