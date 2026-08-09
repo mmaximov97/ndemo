@@ -204,6 +204,30 @@ segments:
         duration: 2000
 ```
 
+### Custom TTS command
+
+Any external synthesizer can be plugged in with `provider: command`. ndemo
+passes the narration on **stdin** and dictates the output path; the command
+must write an mp3 there and exit 0.
+
+```yaml
+tts:
+  provider: command
+  voice: vpc_84_k1qHjqVuM
+  speed: 0.9
+  command: "{{skillDir}}/contrib/ailab-tts.sh --voice {{voice}} --speed {{speed}} --out {{out}}"
+```
+
+Placeholders: `{{out}}`, `{{voice}}`, `{{speed}}`, `{{skillDir}}` (the toolkit
+install root). The narration is never interpolated into the command line.
+Whatever the command writes to stderr is streamed through, which is how a slow
+synthesizer shows it is alive.
+
+`contrib/ailab-tts.sh` is a working example, and suits any gateway whose
+`/v1/audio/speech` returns a job to poll rather than ready audio. It needs
+`AILAB_BASE_URL` and `AILAB_API_KEY` in the environment, plus `curl`, `jq`
+and `ffmpeg`.
+
 ### Action types
 
 | Type | Required fields | Notes |
