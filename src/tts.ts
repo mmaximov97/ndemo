@@ -183,4 +183,22 @@ async function probeDuration(audioPath: string): Promise<number> {
 // Keep generateTts as an alias for ensureAudio for backwards compat within renderer
 const generateTts = ensureAudio;
 
-export { generateTts, ensureAudio, probeDuration, ttsHash, findAudioFile, buildCommand, runCommandProvider, skillDir };
+/**
+ * Сколько сегментов с закадром придётся синтезировать заново. Считает по тому
+ * же имени файла, что и кеш (`{id}-{hash}.mp3`), — иначе счётчик разошёлся бы
+ * с реальностью при смене голоса или темпа.
+ */
+function pendingSegmentCount(
+  playbook: Playbook,
+  outputDir: string
+): { pending: number; total: number } {
+  const audioDir = path.join(outputDir, "audio");
+  const narrated = playbook.segments.filter(s => s.narration);
+  const pending = narrated.filter(s => {
+    const hash = ttsHash(s.narration!, playbook.tts.voice, playbook.tts.speed);
+    return !fs.existsSync(path.join(audioDir, `${s.id}-${hash}.mp3`));
+  });
+  return { pending: pending.length, total: narrated.length };
+}
+
+export { generateTts, ensureAudio, probeDuration, ttsHash, findAudioFile, buildCommand, runCommandProvider, skillDir, pendingSegmentCount };

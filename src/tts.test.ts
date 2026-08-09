@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { buildCommand, runCommandProvider } from "./tts.js";
+import { buildCommand, runCommandProvider, pendingSegmentCount, ttsHash } from "./tts.js";
+import type { Playbook } from "./schema.js";
 
 function tmpdir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "ndemo-tts-"));
@@ -78,4 +79,23 @@ test("ненулевой код выхода — ошибка с хвостом 
     () => runCommandProvider(`echo "нет такого профиля" >&2; exit 3`, "текст", out),
     /нет такого профиля/
   );
+});
+
+test("pendingSegmentCount не считает сегменты, уже лежащие в кеше", () => {
+  const dir = tmpdir();
+  const playbook = {
+    tts: { provider: "command", voice: "vpc_abc", speed: 1.0, command: "x" },
+    segments: [
+      { id: "intro", narration: "Первая реплика", intent: "…", actions: [], timing: "after" },
+      { id: "middle", narration: "Вторая реплика", intent: "…", actions: [], timing: "after" },
+      { id: "outro", intent: "без закадра", actions: [], timing: "after" },
+    ],
+  } as unknown as Playbook;
+
+  const audioDir = path.join(dir, "audio");
+  fs.mkdirSync(audioDir, { recursive: true });
+  const hash = ttsHash("Первая реплика", "vpc_abc", 1.0);
+  fs.writeFileSync(path.join(audioDir, `intro-${hash}.mp3`), "звук");
+
+  assert.deepEqual(pendingSegmentCount(playbook, dir), { pending: 1, total: 2 });
 });

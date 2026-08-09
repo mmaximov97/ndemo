@@ -6,7 +6,7 @@ import { execa } from "execa";
 import { loadPlaybook, savePlaybook } from "./playbook-io.js";
 import { runSegment } from "./executor.js";
 import { executeSetup } from "./setup.js";
-import { ensureAudio } from "./tts.js";
+import { ensureAudio, pendingSegmentCount } from "./tts.js";
 import { mergeAudioVideo } from "./merger.js";
 import { generateSrt } from "./subtitles.js";
 import { zoomExtensionArgs, setBrowserZoom } from "./zoom.js";
@@ -41,7 +41,12 @@ async function render(
   fs.mkdirSync(outputDir, { recursive: true });
 
   // Step 1: TTS
-  console.log("Generating TTS audio...");
+  const { pending, total } = pendingSegmentCount(playbook, outputDir);
+  console.log(
+    pending === 0
+      ? `Generating TTS audio... (все ${total} сегментов уже в кеше)`
+      : `Generating TTS audio... (${pending} из ${total} нужно синтезировать)`
+  );
   const audioResults: Array<{ id: string; audioPath: string | null; durationMs: number }> = [];
   for (const segment of playbook.segments) {
     process.stdout.write(`  ${segment.id}...`);
