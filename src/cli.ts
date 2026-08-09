@@ -206,17 +206,19 @@ program
       allOk = false;
     }
 
+    // Ключи провайдеров — предупреждения, а не провал: с провайдером "command"
+    // ни один из них не нужен, а вечно красный doctor на рабочей установке
+    // обесценивает саму проверку.
     if (process.env.OPENAI_API_KEY) {
       console.log("  ✓ OPENAI_API_KEY is set");
     } else {
-      console.log("  ✗ OPENAI_API_KEY not set (required for TTS)");
-      allOk = false;
+      console.log("  ! OPENAI_API_KEY not set (needed only for tts.provider: openai)");
     }
 
     if (process.env.ELEVENLABS_API_KEY) {
       console.log("  ✓ ELEVENLABS_API_KEY is set");
     } else {
-      console.log("  ✗ ELEVENLABS_API_KEY not set (optional, needed for elevenlabs TTS)");
+      console.log("  ! ELEVENLABS_API_KEY not set (needed only for tts.provider: elevenlabs)");
     }
 
     process.exit(allOk ? 0 : 1);
